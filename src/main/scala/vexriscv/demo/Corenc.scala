@@ -9,7 +9,7 @@ import spinal.lib._
 import spinal.lib.bus.amba3.apb._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.com.jtag.Jtag
-import spinal.lib.com.uart.{Apb3UartCtrl, Uart, UartCtrlGenerics, UartCtrlMemoryMappedConfig}
+import spinal.lib.com.uart._
 import spinal.lib.graphic.RgbConfig
 import spinal.lib.graphic.vga.{Axi4VgaCtrl, Axi4VgaCtrlGenerics, Vga}
 import spinal.lib.io.TriStateArray
@@ -28,7 +28,8 @@ case class CorencConfig(axiFrequency : HertzNumber,
 
 object CorencConfig{
 
-  def default = {
+  def default : CorencConfig = default(false)
+  def default(withXip : Boolean) = {
     val config = CorencConfig(
       axiFrequency = 12 MHz,
       onChipRamSize  = 32 kB,
@@ -39,6 +40,12 @@ object CorencConfig{
           preSamplingSize   = 1,
           samplingSize      = 5,
           postSamplingSize  = 2
+        ),
+        initConfig = UartCtrlInitConfig(
+          baudrate = 115200,
+          dataLength = 7,  //7 => 8 bits
+          parity = UartParityType.NONE,
+          stop = UartStopType.ONE
         ),
         txFifoDepth = 16,
         rxFifoDepth = 16
@@ -131,6 +138,49 @@ object CorencConfig{
         ),
         new YamlPlugin("cpu0.yaml")
       )
+      /*cpuPlugins = ArrayBuffer( //DebugPlugin added by the toplevel
+        new IBusSimplePlugin(
+          resetVector = if(withXip) 0xF001E000l else 0x80000000l,
+          cmdForkOnSecondStage = true,
+          cmdForkPersistence = withXip, //Required by the Xip controller
+          prediction = NONE,
+          catchAccessFault = false,
+          compressedGen = false
+        ),
+        new DBusSimplePlugin(
+          catchAddressMisaligned = false,
+          catchAccessFault = false,
+          earlyInjection = false
+        ),
+        new CsrPlugin(CsrPluginConfig.smallest(mtvecInit = if(withXip) 0xE0040020l else 0x80000020l)),
+        new DecoderSimplePlugin(
+          catchIllegalInstruction = false
+        ),
+        new RegFilePlugin(
+          regFileReadyKind = plugin.SYNC,
+          zeroBoot = false
+        ),
+        new IntAluPlugin,
+        new SrcPlugin(
+          separatedAddSub = false,
+          executeInsertion = false
+        ),
+        new LightShifterPlugin,
+        new HazardSimplePlugin(
+          bypassExecute = false,
+          bypassMemory = false,
+          bypassWriteBack = false,
+          bypassWriteBackBuffer = false,
+          pessimisticUseSrc = false,
+          pessimisticWriteRegFile = false,
+          pessimisticAddressMatch = false
+        ),
+        new BranchPlugin(
+          earlyBranch = false,
+          catchAddressMisaligned = false
+        ),
+        new YamlPlugin("cpu0.yaml")
+      )*/
     )
     config
   }
