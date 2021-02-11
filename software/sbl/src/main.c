@@ -71,15 +71,21 @@ void exec_target(void){
     uart_write(UART,0x00);
     GPIO_A->OUTPUT = 0x0000000C;
 }
-
+void wait_gpo(Gpio_Reg*gpio, uint32_t mask, uint32_t val){
+  while((gpio->OUTPUT & mask) != val);
+}
 void main() {
+  GPIO_A->OUTPUT = 0x00000000;
 	GPIO_A->OUTPUT_ENABLE = 0x0000000F;
+  println("Hello from SOC 1");
+  GPIO_A->OUTPUT = 0x00000001;
+  wait_gpo(GPIO_A, 1, 0);
+  println("Hello from SOC 2");
 	GPIO_A->OUTPUT = 0x00000005;
-
+  wait_gpo(GPIO_A, 1, 0);
 	println("A");
-
-    GPIO_A->OUTPUT = 0x00000001;
-    println("Entering SBL\n");
+  GPIO_A->OUTPUT = 0x00000001;
+  println("Entering SBL\n");
 	sbl_main();
 	while(1);
 }
