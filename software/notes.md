@@ -8,6 +8,10 @@
 to generate trace (vcd file):
 `make clean run TRACE=yes`
 
+## to build with vivado
+`source /home/user/bin/Xilinx/Vivado/2018.2/settings64.sh`
+then `./build_arty`
+
 ## Debugger tab in eclipse
 
 ### GDB Setup

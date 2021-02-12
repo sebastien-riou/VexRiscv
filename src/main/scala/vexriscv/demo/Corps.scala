@@ -6,6 +6,7 @@ import vexriscv.ip.{DataCacheConfig, InstructionCacheConfig}
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba3.apb._
+import spinal.lib.bus.amba3.ahblite._
 import spinal.lib.bus.amba4.axi._
 import spinal.lib.com.jtag.Jtag
 import spinal.lib.com.uart._
@@ -277,10 +278,28 @@ class Corps(config: CorpsConfig) extends Component{
       apbBridge.io.axi -> (0xF0000000L,   1 MB)
     )
 
+    /*
+    val ahbBridge = AhbLite3ToAxi4SharedBridge(
+      ahbConfig = AhbLite3Config(addressWidth = 32,dataWidth = 32),
+      axiConfig = Axi4Config(
+        addressWidth = 32,
+        dataWidth    = 32,
+        useId = false,
+        useRegion = false,
+        useBurst = false,
+        useLock = false,
+        useQos = false,
+        useLen = false,
+        useResp = true
+      )
+    )
+    ahbBridge.io.ahb <> subsys.io.ahb
+    */
     axiCrossbar.addConnections(
       core.iBus       -> List(ram.io.axi),
       core.dBus       -> List(ram.io.axi, apbBridge.io.axi),
       subsys.io.axi   -> List(ram.io.axi, apbBridge.io.axi)
+      //ahbBridge.io.axi -> List(ram.io.axi, apbBridge.io.axi)
     )
 
     axiCrossbar.addPipelining(apbBridge.io.axi)((crossbar,bridge) => {

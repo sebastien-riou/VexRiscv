@@ -43,6 +43,7 @@ object SubsysModelSysConfig{
     pipelineMainBus       = false,
     pipelineApbBridge     = true,
     hardwareBreakpointCount = 0,
+    //useAxi                = false
     cpuPlugins = ArrayBuffer( //DebugPlugin added by the toplevel
       new vexriscv.plugin.IBusSimplePlugin(
         resetVector = 0x80000000l,
@@ -190,7 +191,11 @@ case class PipelinedMemoryBusToAxi4SharedBridge(axiConfig: Axi4Config, pipelineB
   io.axi.sharedCmd.prot := "010"
   io.axi.sharedCmd.cache := "1111"
   io.axi.sharedCmd.size := cmdForkSize.resized
-  io.axi.sharedCmd.addr := U"h80000000" | cmdFork.address.resized
+  //val mask = UInt(32 bits)
+  //mask := addrOr
+  //mask := U"h80000000"
+  //io.axi.sharedCmd.addr := mask | cmdFork.address.resized
+  io.axi.sharedCmd.addr := cmdFork.address.resized
 
   val dataStage = dataFork.throwWhen(!dataFork.write)
   io.axi.writeData.arbitrationFrom(dataStage)
@@ -205,8 +210,8 @@ case class PipelinedMemoryBusToAxi4SharedBridge(axiConfig: Axi4Config, pipelineB
   io.axi.r.ready := True
   io.axi.b.ready := True
 }
-/*
-case class PipelinedMemoryBusToAhbBridge(ahbConfig: AhbLite3Config, pipelineBridge : Boolean, pipelinedMemoryBusConfig : PipelinedMemoryBusConfig) extends Component{
+
+case class PipelinedMemoryBusToAhbBridge(ahbConfig: AhbLite3Config, pipelinedMemoryBusConfig : PipelinedMemoryBusConfig) extends Component{
   assert(ahbConfig.dataWidth == pipelinedMemoryBusConfig.dataWidth)
 
   val io = new Bundle {
@@ -215,30 +220,108 @@ case class PipelinedMemoryBusToAhbBridge(ahbConfig: AhbLite3Config, pipelineBrid
   }
 
   val busStage = PipelinedMemoryBus(pipelinedMemoryBusConfig)
-  busStage.cmd << (if(pipelineBridge) io.pipelinedMemoryBus.cmd.halfPipe() else io.pipelinedMemoryBus.cmd)
+  busStage.cmd <<  io.pipelinedMemoryBus.cmd
   busStage.rsp >-> io.pipelinedMemoryBus.rsp
 
   busStage.cmd.ready := io.ahb.HREADY
 
-  when(busStage.cmd.valid) {
+  val new_cmd = busStage.cmd.valid & io.ahb.HREADY
+  when(new_cmd) { //TODO: all those shall be registers to deal with wait states AND a master doing back to back single accesses
     io.ahb.HTRANS  := AhbLite3.NONSEQ //NONSEQ
+    val cmdSize = CountOne(busStage.cmd.mask)-1
+    io.ahb.HSIZE     := B(cmdSize, 3 bits)
+    io.ahb.HWRITE    := busStage.cmd.write
+    val mask = UInt(32 bits)
+    io.ahb.HADDR     := busStage.cmd.address.resized
   } otherwise {
     io.ahb.HTRANS  := AhbLite3.IDLE //IDLE
+    //just easier to debug
+    io.ahb.HSIZE     := B(0, 3 bits)
+    io.ahb.HWRITE    := False
+    io.ahb.HADDR     := 0
   }
+  io.ahb.HWDATA    := busStage.cmd.data
   io.ahb.HBURST    := 0 // SINGLE
-  io.ahb.HSIZE     := B(busStage.cmd.size, 3 bits)
   io.ahb.HPROT     := "1111"
   io.ahb.HMASTLOCK := False
-  io.ahb.HWRITE    := busStage.cmd.write
-  io.ahb.HADDR     := busStage.cmd.address.resized
-  io.ahb.HWDATA    := RegNextWhen(busStage.cmd.data, bus.HREADY)
 
-  val pending = RegInit(False) clearWhen(bus.HREADY) setWhen(busStage.cmd.fire && !busStage.cmd.write)
-  busStage.rsp.ready := io.ahb.HREADY && pending
+  val pending_read = RegInit(False) clearWhen(io.ahb.HREADY) setWhen(busStage.cmd.fire && !busStage.cmd.write)
+  busStage.rsp.valid := io.ahb.HREADY && pending_read
   busStage.rsp.data  := io.ahb.HRDATA
-  busStage.rsp.error := io.ahb.HRESP
-}*/
+  //busStage.rsp.error := io.ahb.HRESP
+}
 
+case class AhbLite3ToPipelinedMemoryBusBridge(ahbConfig: AhbLite3Config, pipelinedMemoryBusConfig : PipelinedMemoryBusConfig) extends Component{
+  assert(ahbConfig.dataWidth == pipelinedMemoryBusConfig.dataWidth)
+
+  val io = new Bundle {
+    val ahb = slave(AhbLite3Master(ahbConfig))
+    val pmb = master(PipelinedMemoryBus(pipelinedMemoryBusConfig))
+  }
+
+  //val addr_stage_ready = io.pmb.cmd.ready
+  val ahbReq = io.ahb.HTRANS === AhbLite3.NONSEQ
+  //val pending = RegInit(False) clearWhen(io.pmb.rsp.valid) setWhen(io.pmb.cmd.isStall)
+  //pending := False
+  //when(io.pmb.cmd.isStall) {
+  //  pending := True
+  //}
+  //val pending = io.pmb.cmd.isStall
+  val addr_stage_ready = io.pmb.rsp.valid | !io.pmb.cmd.isStall
+  val addr_stage_req = addr_stage_ready & ahbReq
+  val pending_read = RegInit(False) clearWhen(io.pmb.rsp.valid) setWhen(addr_stage_req && !io.ahb.HWRITE)
+
+  //io.pmb.cmd.valid := RegNextWhen(io.ahb.HTRANS === AhbLite3.NONSEQ, addr_stage_ready)
+  //io.pmb.cmd.valid init(False) //reset val
+
+  io.pmb.cmd.valid := RegInit(False) clearWhen(io.pmb.cmd.ready && !ahbReq) setWhen(ahbReq && !pending_read)
+
+  assert(io.ahb.HBURST === 0)
+  val cmdMask = io.ahb.HSIZE.mux(
+    0 -> B"0001",
+    1 -> B"0011",
+    default -> B"1111"
+  )
+  io.pmb.cmd.mask := RegNextWhen(cmdMask, addr_stage_req)
+  assert(io.ahb.HPROT === "1111")
+  assert(io.ahb.HMASTLOCK === False)
+  io.pmb.cmd.write := RegNextWhen(io.ahb.HWRITE, addr_stage_req)
+  io.pmb.cmd.address := RegNextWhen(io.ahb.HADDR, addr_stage_req)
+  io.pmb.cmd.data := RegNextWhen(io.ahb.HWDATA, addr_stage_req)
+
+  io.ahb.HREADY := io.pmb.rsp.valid | (!io.pmb.cmd.valid & !pending_read)
+  io.ahb.HRDATA := io.pmb.rsp.data
+}
+
+case class AhbLite3ToAxi4SharedBridge(axiConfig: Axi4Config, ahbConfig : AhbLite3Config) extends Component{
+  assert(axiConfig.dataWidth == ahbConfig.dataWidth)
+
+  val io = new Bundle {
+    val ahb = slave(AhbLite3Master(ahbConfig))
+    val axi = master(Axi4Shared(axiConfig))
+  }
+
+  val pipelinedMemoryBusConfig = PipelinedMemoryBusConfig(
+    addressWidth = axiConfig.addressWidth,
+    dataWidth = axiConfig.dataWidth
+  )
+
+  val inBridge = new AhbLite3ToPipelinedMemoryBusBridge(
+    ahbConfig = ahbConfig,
+    pipelinedMemoryBusConfig = pipelinedMemoryBusConfig
+  )
+  io.ahb <> inBridge.io.ahb
+
+
+  val outBridge = new PipelinedMemoryBusToAxi4SharedBridge(
+    axiConfig = axiConfig,
+    //addrOr = U"h00000000",
+    pipelineBridge = false,
+    pipelinedMemoryBusConfig = pipelinedMemoryBusConfig
+  )
+  inBridge.io.pmb <> outBridge.io.pipelinedMemoryBus
+  io.axi <> outBridge.io.axi
+}
 
 class SubsysModelPipelinedMemoryBusDecoder(master : PipelinedMemoryBus, val specification : Seq[(PipelinedMemoryBus,SizeMapping)], pipelineMaster : Boolean) extends Area{
   val masterPipelined = PipelinedMemoryBus(master.config)

@@ -17,7 +17,7 @@ import scala.collection.mutable.ArrayBuffer
 import vexriscv.plugin._
 
 object MasterSubsys{
-  def getAhbConfig() = AhbLite3Config(addressWidth = 31,dataWidth = 32)
+  def getAhbConfig() = AhbLite3Config(addressWidth = 32,dataWidth = 32)
   def getAxiConfig() = Axi4Config(
     addressWidth = 32,
     dataWidth    = 32,
@@ -38,7 +38,7 @@ case class MasterSubsys(config : SubsysModelSysConfig = SubsysModelSysConfig.def
     val rstb = in Bool
     val io = new Bundle {
         val jtag = slave(Jtag())
-        //val ahb  = master(AhbLite3Master(AhbSubsys.getAhbConfig()))
+        //val ahb  = master(AhbLite3Master(MasterSubsys.getAhbConfig()))
         val axi = master(Axi4Shared(MasterSubsys.getAxiConfig()))
     }
     val systemReset = Bool
@@ -110,22 +110,57 @@ case class MasterSubsys(config : SubsysModelSysConfig = SubsysModelSysConfig.def
 
             //****** MainBus slaves ********
             val mainBusMapping = ArrayBuffer[(PipelinedMemoryBus,SizeMapping)]()
+
+            val axi4Config = Axi4Config(
+              addressWidth = 32,
+              dataWidth    = 32,
+              useId = false,
+              useRegion = false,
+              useBurst = false,
+              useLock = false,
+              useQos = false,
+              useLen = false,
+              useResp = true
+            )
             val masterBridge = new PipelinedMemoryBusToAxi4SharedBridge(
-              axiConfig = Axi4Config(
-                addressWidth = 32,
-                dataWidth    = 32,
-                useId = false,
-                useRegion = false,
-                useBurst = false,
-                useLock = false,
-                useQos = false,
-                useLen = false,
-                useResp = true
-              ),
+              axiConfig = axi4Config,
               pipelineBridge = false,
               pipelinedMemoryBusConfig = pipelinedMemoryBusConfig
             )
-            masterBridge.io.axi <> io.axi
+
+            /*
+            val src_axi = masterBridge.io.axi
+            val remapped_axi = cloneOf(src_axi)
+            src_axi.arw ~~ (in => {
+                val out = cloneOf(in)
+                out := in
+                out.allowOverride
+                out.addr := in.addr | U"h80000000"
+                out
+            }) >> remapped_axi.arw
+            src_axi.w >> remapped_axi.w
+            src_axi.b << remapped_axi.b
+            src_axi.r << remapped_axi.r
+            */
+            val src_axi = masterBridge.io.axi
+            val remapped_axi = cloneOf(src_axi)
+            src_axi.arw  >> remapped_axi.arw
+            src_axi.w >> remapped_axi.w
+            src_axi.b << remapped_axi.b
+            src_axi.r << remapped_axi.r
+            remapped_axi.arw.addr.removeAssignments() := src_axi.arw.addr  | U"h80000000"
+            remapped_axi <> io.axi
+
+            /*
+            val masterBridge = new PipelinedMemoryBusToAhbBridge(
+              ahbConfig = MasterSubsys.getAhbConfig(),
+              pipelineBridge = false,
+              pipelinedMemoryBusConfig = pipelinedMemoryBusConfig
+            )
+            val remapped_port = masterBridge.io.ahb
+            remapped_port <> io.ahb
+            */
+
             mainBusMapping += masterBridge.io.pipelinedMemoryBus -> (0x00000000l, 2 GB)
 
             val ram = new SubsysModelPipelinedMemoryBusRam(
