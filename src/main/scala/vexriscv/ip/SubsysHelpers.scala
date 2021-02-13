@@ -240,7 +240,7 @@ case class PipelinedMemoryBusToAhbBridge(ahbConfig: AhbLite3Config, pipelinedMem
     io.ahb.HWRITE    := False
     io.ahb.HADDR     := 0
   }
-  io.ahb.HWDATA    := busStage.cmd.data
+  io.ahb.HWDATA    := RegNextWhen(busStage.cmd.data, new_cmd)
   io.ahb.HBURST    := 0 // SINGLE
   io.ahb.HPROT     := "1111"
   io.ahb.HMASTLOCK := False
@@ -259,20 +259,11 @@ case class AhbLite3ToPipelinedMemoryBusBridge(ahbConfig: AhbLite3Config, pipelin
     val pmb = master(PipelinedMemoryBus(pipelinedMemoryBusConfig))
   }
 
-  //val addr_stage_ready = io.pmb.cmd.ready
   val ahbReq = io.ahb.HTRANS === AhbLite3.NONSEQ
-  //val pending = RegInit(False) clearWhen(io.pmb.rsp.valid) setWhen(io.pmb.cmd.isStall)
-  //pending := False
-  //when(io.pmb.cmd.isStall) {
-  //  pending := True
-  //}
-  //val pending = io.pmb.cmd.isStall
+
   val addr_stage_ready = io.pmb.rsp.valid | !io.pmb.cmd.isStall
   val addr_stage_req = addr_stage_ready & ahbReq
   val pending_read = RegInit(False) clearWhen(io.pmb.rsp.valid) setWhen(addr_stage_req && !io.ahb.HWRITE)
-
-  //io.pmb.cmd.valid := RegNextWhen(io.ahb.HTRANS === AhbLite3.NONSEQ, addr_stage_ready)
-  //io.pmb.cmd.valid init(False) //reset val
 
   io.pmb.cmd.valid := RegInit(False) clearWhen(io.pmb.cmd.ready && !ahbReq) setWhen(ahbReq && !pending_read)
 
@@ -281,17 +272,19 @@ case class AhbLite3ToPipelinedMemoryBusBridge(ahbConfig: AhbLite3Config, pipelin
     0 -> B"0001",
     1 -> B"0011",
     default -> B"1111"
-  )
+  ) |<< io.ahb.HADDR(1 downto 0)
   io.pmb.cmd.mask := RegNextWhen(cmdMask, addr_stage_req)
   assert(io.ahb.HPROT === "1111")
   assert(io.ahb.HMASTLOCK === False)
   io.pmb.cmd.write := RegNextWhen(io.ahb.HWRITE, addr_stage_req)
   io.pmb.cmd.address := RegNextWhen(io.ahb.HADDR, addr_stage_req)
-  io.pmb.cmd.data := RegNextWhen(io.ahb.HWDATA, addr_stage_req)
+  io.pmb.cmd.data := io.ahb.HWDATA
 
-  io.ahb.HREADY := io.pmb.rsp.valid | (!io.pmb.cmd.valid & !pending_read)
+  val write_accepted = io.pmb.cmd.valid & io.pmb.cmd.write & io.pmb.cmd.ready
+  io.ahb.HREADY := write_accepted | io.pmb.rsp.valid | (!io.pmb.cmd.valid & !pending_read)
   io.ahb.HRDATA := io.pmb.rsp.data
 }
+
 
 case class AhbLite3ToAxi4SharedBridge(axiConfig: Axi4Config, ahbConfig : AhbLite3Config) extends Component{
   assert(axiConfig.dataWidth == ahbConfig.dataWidth)

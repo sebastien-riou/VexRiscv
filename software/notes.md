@@ -11,6 +11,7 @@ to generate trace (vcd file):
 ## to build with vivado
 `source /home/user/bin/Xilinx/Vivado/2018.2/settings64.sh`
 then `./build_arty`
+then `user@lafite:~/TESIC_model/VexRiscv/scripts/Murax/arty_a7$ make`
 
 ## Debugger tab in eclipse
 
